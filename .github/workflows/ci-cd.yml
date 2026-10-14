@@ -1,0 +1,169 @@
+name: CI-CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------- 1. Build + unit tests ----------
+  test:
+    name: Build and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - name: Backend tests
+        working-directory: backend
+        run: npm ci --ignore-scripts && npm test
+      - name: Frontend build
+        working-directory: frontend
+        run: npm ci --ignore-scripts && npm run build
+      - uses: erlef/setup-beam@v1
+        with: { otp-version: "26", rebar3-version: "3.23" }
+      - name: Worker compile
+        working-directory: worker
+        run: rebar3 compile
+
+  # ---------- 2. Secret scanning ----------
+  secrets-scan:
+    name: Secret scan (Gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Gitleaks
+        run: |
+          docker run --rm -v "$PWD:/repo" --entrypoint sh zricethezav/gitleaks:v8.18.4 -c \
+            "git config --global --add safe.directory /repo && gitleaks detect --source /repo --verbose --redact"
+
+  # ---------- 3. SAST ----------
+  sast:
+    name: SAST (CodeQL)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with: { languages: javascript-typescript }
+      - uses: github/codeql-action/analyze@v3
+
+  # ---------- 4. SCA + Dockerfile/IaC scanning ----------
+  sca-iac:
+    name: Dependencies, Dockerfile and config scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - name: npm audit (known vulnerable packages)
+        run: |
+          for d in backend frontend; do (cd $d && npm audit --omit=dev --audit-level=high); done
+      - name: Trivy filesystem scan (dependencies and secrets)
+        run: |
+          docker run --rm -v "$PWD:/src" aquasec/trivy:0.55.0 fs \
+            --scanners vuln,secret --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 /src
+      - name: Trivy config scan (Dockerfile misconfigurations)
+        run: |
+          docker run --rm -v "$PWD:/src" aquasec/trivy:0.55.0 config \
+            --severity HIGH,CRITICAL --exit-code 1 /src
+      - name: Hadolint (Dockerfile lint)
+        run: |
+          for s in backend frontend worker; do
+            docker run --rm -i hadolint/hadolint:v2.12.0 hadolint --failure-threshold error - < $s/Dockerfile
+          done
+
+  # ---------- 5. Build, scan image, SBOM, push ----------
+  build-scan-push:
+    name: Image ${{ matrix.service }}
+    needs: [test, secrets-scan, sast, sca-iac]
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    strategy:
+      matrix:
+        service: [backend, frontend, worker]
+    env:
+      IMAGE: ${{ vars.ACR_NAME }}.azurecr.io/${{ matrix.service }}:${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build --pull -t "$IMAGE" ./${{ matrix.service }}
+      - name: Trivy image scan (fails on HIGH or CRITICAL)
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.55.0 image \
+            --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 "$IMAGE"
+      - name: Generate SBOM (CycloneDX)
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD:/out" aquasec/trivy:0.55.0 image \
+            --format cyclonedx --output /out/sbom-${{ matrix.service }}.json "$IMAGE"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom-${{ matrix.service }}
+          path: sbom-${{ matrix.service }}.json
+      - name: Azure login (OIDC, no stored password)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Push to ACR
+        run: |
+          az acr login --name "${{ vars.ACR_NAME }}"
+          docker push "$IMAGE"
+
+  # ---------- 6. Deploy ----------
+  deploy:
+    name: Deploy to Azure Container Apps
+    needs: build-scan-push
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Deploy
+        env:
+          RG: ${{ vars.AZURE_RG }}
+          ENV_NAME: ${{ vars.ACA_ENV }}
+          ACR_NAME: ${{ vars.ACR_NAME }}
+          IDENTITY_ID: ${{ vars.IDENTITY_ID }}
+          PG_HOST: ${{ vars.PG_HOST }}
+          PG_PASSWORD: ${{ secrets.PG_PASSWORD }}
+          RABBIT_PASSWORD: ${{ secrets.RABBIT_PASSWORD }}
+          TAG: ${{ github.sha }}
+        run: bash infra/deploy.sh
+
+  # ---------- 7. DAST ----------
+  dast:
+    name: DAST (OWASP ZAP)
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for gateway health
+        run: sleep 60
+      - name: ZAP baseline scan against the live app
+        run: |
+          docker run --rm -u root -v "$PWD:/zap/wrk:rw" ghcr.io/zaproxy/zaproxy:stable \
+            zap-baseline.py -t "${{ vars.APP_URL }}" -r zap-report.html -I
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: zap-report
+          path: zap-report.html

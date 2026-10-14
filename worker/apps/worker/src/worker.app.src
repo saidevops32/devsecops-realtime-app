@@ -1,0 +1,8 @@
+{application, worker, [
+  {description, "RabbitMQ task worker"},
+  {vsn, "0.1.0"},
+  {registered, []},
+  {mod, {worker_app, []}},
+  {applications, [kernel, stdlib, amqp_client, jsx]},
+  {env, []}
+]}.
