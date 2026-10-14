@@ -18,7 +18,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 20 }
+        with: { node-version: 22 }
       - name: Backend tests
         working-directory: backend
         run: npm ci --ignore-scripts && npm test
@@ -64,7 +64,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 20 }
+        with: { node-version: 22 }
       - name: npm audit (known vulnerable packages)
         run: |
           for d in backend frontend; do (cd $d && npm audit --omit=dev --audit-level=high); done
@@ -92,6 +92,7 @@ jobs:
       id-token: write
       contents: read
     strategy:
+      fail-fast: false
       matrix:
         service: [backend, frontend, worker]
     env:

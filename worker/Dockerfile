@@ -6,10 +6,7 @@ COPY apps ./apps
 RUN rebar3 as prod release
 
 FROM debian:bookworm-slim
-RUN apt-get update \
- && apt-get install -y --no-install-recommends libssl3 libncurses6 libstdc++6 \
- && rm -rf /var/lib/apt/lists/* \
- && useradd --system --no-create-home appuser
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends libssl3 libncurses6 libstdc++6 && rm -rf /var/lib/apt/lists/* && useradd --system --no-create-home appuser
 WORKDIR /app
 COPY --from=build --chown=appuser /src/_build/prod/rel/worker ./
 USER appuser

@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM node:20.17-alpine AS build
+FROM node:22-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --ignore-scripts
@@ -7,7 +7,10 @@ COPY index.html vite.config.js ./
 COPY src ./src
 RUN npm run build
 
-FROM nginxinc/nginx-unprivileged:1.27-alpine
+
+FROM nginxinc/nginx-unprivileged:stable-alpine
+USER root
+RUN apk upgrade --no-cache
 COPY --from=build /app/dist /usr/share/nginx/html
 COPY nginx.conf.template /etc/nginx/templates/default.conf.template
 ENV BACKEND_URL=http://backend
