@@ -16,7 +16,7 @@ jobs:
     name: Build and test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with: { node-version: 20 }
       - name: Backend tests
@@ -36,7 +36,7 @@ jobs:
     name: Secret scan (Gitleaks)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: { fetch-depth: 0 }
       - name: Gitleaks
         run: |
@@ -52,7 +52,7 @@ jobs:
       security-events: write
       actions: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: github/codeql-action/init@v3
         with: { languages: javascript-typescript }
       - uses: github/codeql-action/analyze@v3
@@ -62,7 +62,7 @@ jobs:
     name: Dependencies, Dockerfile and config scan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with: { node-version: 20 }
       - name: npm audit (known vulnerable packages)
@@ -97,7 +97,7 @@ jobs:
     env:
       IMAGE: ${{ vars.ACR_NAME }}.azurecr.io/${{ matrix.service }}:${{ github.sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Build image
         run: docker build --pull -t "$IMAGE" ./${{ matrix.service }}
       - name: Trivy image scan (fails on HIGH or CRITICAL)
@@ -132,7 +132,7 @@ jobs:
       id-token: write
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
