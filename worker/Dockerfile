@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM erlang:26 AS build
+FROM erlang:29 AS build
 WORKDIR /src
 COPY rebar.config ./
 COPY apps ./apps
