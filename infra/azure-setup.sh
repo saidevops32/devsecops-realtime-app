@@ -28,7 +28,6 @@ az network vnet subnet create -g $RG --vnet-name $VNET -n aca-subnet --address-p
   --delegations Microsoft.App/environments -o none
 az network vnet subnet create -g $RG --vnet-name $VNET -n agw-subnet --address-prefixes 10.0.2.0/24 -o none
 az network vnet subnet create -g $RG --vnet-name $VNET -n pg-subnet  --address-prefixes 10.0.3.0/24 \
-
   --delegations Microsoft.DBforPostgreSQL/flexibleServers -o none
 ACA_SUBNET_ID=$(az network vnet subnet show -g $RG --vnet-name $VNET -n aca-subnet --query id -o tsv)
 PG_SUBNET_ID=$(az network vnet subnet show -g $RG --vnet-name $VNET -n pg-subnet  --query id -o tsv)
